@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Count 1 to 1000</title>
+  <style>
+    :root {
+      --text-light: #ffffff;
+      --text-dark: #111111;
+    }
+    html,body {
+      height: 100%;
+      margin: 0;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      background: #111;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    .wrap {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      transition: background-color 420ms ease;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .stack {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    #num {
+      font-size: 140px;
+      line-height: 1;
+      margin: 0;
+      font-weight: 700;
+      text-shadow: 0 3px 10px rgba(0,0,0,0.25);
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #hint {
+      font-size: 18px;
+      opacity: 0.9;
+    }
+    .small-hint {
+      position: fixed;
+      bottom: 12px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 13px;
+      opacity: 0.8;
+      pointer-events: none;
+    }
+    @media (max-width:480px) {
+      #num { font-size: 92px; }
+      #hint { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="wrap" class="wrap" role="application" aria-label="Counting app">
+    <div class="stack">
+      <div id="num" aria-live="polite">1</div>
+      <div id="hint">Touch anywhere to go to the next number</div>
+    </div>
+  </div>
+  <div class="small-hint">Tap the screen — stops at 1000</div>
+
+  <script>
+  (function(){
+    const MAX = 1000;
+    let current = 1;
+    const wrap = document.getElementById('wrap');
+    const numEl = document.getElementById('num');
+    const hintEl = document.getElementById('hint');
+
+    // --- Colors: generate MAX unique HSL colors, then shuffle ---
+    function generateColors(n){
+      const colors = new Array(n);
+      // golden angle distribution for even spread of hues
+      const golden = 137.508;
+      for(let i=0;i<n;i++){
+        const hue = (i * golden) % 360;
+        // vary saturation/lightness slightly for variety but keep readable
+        const sat = 65 + ((i * 11) % 10);   // 65..74
+        const light = 42 + ((i * 17) % 18); // 42..59
+        colors[i] = `hsl(${Math.round(hue)} ${sat}% ${light}%)`;
+      }
+      return shuffle(colors);
+    }
+
+    function shuffle(arr){
+      for(let i=arr.length-1;i>0;i--){
+        const j = Math.floor(Math.random()*(i+1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    const colors = generateColors(MAX);
+
+    // --- Text contrast: decide whether text should be light or dark based on L from HSL ---
+    function setContrastFor(hslString){
+      // extract the last % number (lightness) e.g. hsl(h s% l%)
+      const m = hslString.match(/hsl\\([^\\s]+\\s+\\d+%\\s+(\\d+)%\\)/);
+      let L = 50;
+      if(m && m[1]) L = parseInt(m[1], 10);
+      if(L > 60) {
+        numEl.style.color = getComputedStyle(document.documentElement).getPropertyValue('--text-dark') || '#111';
+        hintEl.style.color = '#222';
+      } else {
+        numEl.style.color = getComputedStyle(document.documentElement).getPropertyValue('--text-light') || '#fff';
+        hintEl.style.color = 'rgba(255,255,255,0.95)';
+      }
+    }
+
+    // --- Speech: prefer Web Speech API; fallback to beep via WebAudio ---
+    let speechSupported = 'speechSynthesis' in window && typeof SpeechSynthesisUtterance === 'function';
+    // Some browsers require user gesture to allow TTS — so it will be triggered on first tap.
+    function speak(n){
+      const text = String(n);
+      if(window.AndroidBridge && typeof window.AndroidBridge.speak === 'function'){
+        try{
+          window.AndroidBridge.speak(text);
+          return;
+        }catch(e){}
+      }
+      if(speechSupported){
+        try{
+          window.speechSynthesis.cancel();
+          const u = new SpeechSynthesisUtterance(text);
+          u.rate = 0.95;
+          u.pitch = 1;
+          // don't set lang — let system choose best voice; you can set u.lang = 'en-IN' if desired
+          window.speechSynthesis.speak(u);
+          return;
+        }catch(e){
+          // fall through to beep
+        }
+      }
+      // fallback beep
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'sine';
+        o.frequency.value = 220 + (n % 12) * 22;
+        g.gain.value = 0.06;
+        o.connect(g);
+        g.connect(ctx.destination);
+        o.start();
+        setTimeout(()=>{ o.stop(); try{ctx.close();}catch(e){} }, 220);
+      } catch(e){}
+    }
+
+    // --- Advance number and update UI ---
+    function showNumber(n){
+      numEl.textContent = n;
+      // color for index (n-1)
+      const color = colors[(n-1) % colors.length];
+      wrap.style.backgroundColor = color;
+      setContrastFor(color);
+    }
+
+    // initialize
+    showNumber(1);
+
+    // Debounce/lock to avoid multiple advances from a single touch
+    let locked = false;
+    function next(){
+      if(locked) return;
+      locked = true;
+      setTimeout(()=>{ locked = false; }, 220);
+
+      if(current >= MAX){
+        numEl.textContent = '🎉';
+        hintEl.textContent = 'Done — you reached 1000!';
+        speak('Congratulations. You reached one thousand.');
+        return;
+      }
+      current++;
+      showNumber(current);
+      // speak with a tiny delay so UI can update quickly before speech starts on some devices
+      setTimeout(()=> speak(current), 40);
+      if(current === MAX) hintEl.textContent = 'Done — you reached 1000!';
+    }
+
+    // Unified pointer handler (works for touch and mouse)
+    const handler = (e)=>{ 
+      e.preventDefault && e.preventDefault();
+      next();
+    };
+
+    // Attach events
+    document.addEventListener('pointerdown', handler, {passive:false});
+    // also support keyboard for desktop testing
+    document.addEventListener('keydown', (ev)=>{
+      if(ev.key === ' ' || ev.key === 'ArrowRight'){
+        ev.preventDefault();
+        next();
+      }
+    });
+
+    // Accessibility: user can long-press number to copy
+    numEl.title = 'Tap anywhere to advance';
+
+    // Expose a tiny API for debugging (optional)
+    window.__countApp = {
+      get current(){ return current; },
+      set current(v){ current = Math.min(MAX, Math.max(1, Math.floor(v))); showNumber(current); },
+      reset(){ current = 1; showNumber(1); hintEl.textContent = 'Touch anywhere to go to the next number'; }
+    };
+  })();
+  </script>
+</body>
+</html>
